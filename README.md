@@ -16,7 +16,7 @@ use Wpjscc\MySQL\Pool;
 use React\MySQL\QueryResult;
 use React\MySQL\ConnectionInterface;
 
-$pool = new Pool('username:password@host?timeout=5/databasename', [
+$pool = new Pool('username:password@host/databasename?timeout=5', [
     'max_connections' => 10, // 10 connection --default 10
     'max_wait_queue' => 50, // how many sql in queue --default 50
     'wait_timeout' => 5,// wait time include response time --default 0
@@ -29,9 +29,9 @@ for ($i=0; $i < 10; $i++) {
         echo "query:$i\n";
         if (isset($command->resultRows)) {
             // this is a response to a SELECT etc. with some rows (0+)
-            // print_r($command->resultFields);
-            // print_r($command->resultRows);
-            // echo count($command->resultRows) . ' row(s) in set' . PHP_EOL;
+            print_r($command->resultFields);
+            print_r($command->resultRows);
+            echo count($command->resultRows) . ' row(s) in set' . PHP_EOL;
         } else {
             // this is an OK message in response to an UPDATE etc.
             if ($command->insertId !== 0) {
@@ -54,9 +54,9 @@ for ($i=0; $i < 10; $i++) {
 
             if (isset($command->resultRows)) {
                 // this is a response to a SELECT etc. with some rows (0+)
-                // print_r($command->resultFields);
-                // print_r($command->resultRows);
-                // echo count($command->resultRows) . ' row(s) in set' . PHP_EOL;
+                print_r($command->resultFields);
+                print_r($command->resultRows);
+                echo count($command->resultRows) . ' row(s) in set' . PHP_EOL;
             } else {
                 // this is an OK message in response to an UPDATE etc.
                 if ($command->insertId !== 0) {

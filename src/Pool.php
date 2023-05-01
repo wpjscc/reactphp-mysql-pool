@@ -76,12 +76,12 @@ class Pool
             return \React\Promise\resolve($this->factory->createLazyConnection($this->uri));
         }
 
-        if ($this->max_wait_queue && $this->wait_queue->coount() >= $this->max_wait_queue) {
+        if ($this->max_wait_queue && $this->wait_queue->count() >= $this->max_wait_queue) {
             return \React\Promise\reject(new \Exception("over max_wait_queue: ". $this->max_wait_queue.'-current quueue:'.$this->wait_queue->count()));
         }
 
         $deferred = new Deferred();
-        $this->wait_queue->detach($deferred);
+        $this->wait_queue->attach($deferred);
 
         if (!$this->wait_timeout) {
             return $deferred->promise();
@@ -91,7 +91,7 @@ class Pool
 
         return \React\Promise\Timer\timeout($deferred->promise(), $this->wait_timeout, $this->loop)->then(null, function ($e) use ($that, $deferred) {
             
-            $that->wait_queue->attach($deferred);
+            $that->wait_queue->detach($deferred);
 
             if ($e instanceof TimeoutException) {
                 throw new \RuntimeException(
@@ -106,8 +106,9 @@ class Pool
     public function releaseConnection(ConnectionInterface $connection)
     {
         if ($this->wait_queue->count()>0) {
-            $deferred = $this->wait_queue->next();
+            $deferred = $this->wait_queue->current();
             $deferred->resolve($connection);
+            $this->wait_queue->detach($deferred);
             return;
         }
 
