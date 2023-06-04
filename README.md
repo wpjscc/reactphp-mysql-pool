@@ -53,20 +53,18 @@ function queryStream($pool){
     for ($i=0; $i < 90; $i++) { 
         (function($pool,$i){
             $stream = $pool->queryStream('select * from blog');
-            if (!$stream->isReadable()) {
-                echo "queryStream:closed\n";
-            } else {
-                $stream->on('data', function ($data) use ($i) {
-                    // echo "queryStream:$i\n";
-                    // print_r($data);
-                });
-                $stream->on('error', function ($err) {
-                    echo 'Error: ' . $err->getMessage() . PHP_EOL;
-                });
-                $stream->on('end', function () use ($i) {
-                    echo 'Completed.'.$i . PHP_EOL;
-                });
-            }
+           
+            $stream->on('data', function ($data) use ($i) {
+                // echo "queryStream:$i\n";
+                // print_r($data);
+            });
+            $stream->on('error', function ($err) {
+                echo 'Error: ' . $err->getMessage() . PHP_EOL;
+            });
+            $stream->on('end', function () use ($i) {
+                echo 'Completed.'.$i . PHP_EOL;
+            });
+            
            
         })($pool, $i);
         

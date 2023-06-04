@@ -72,7 +72,9 @@ class Pool
     }
     public function queryStream($sql, array $params = [])
     {   
-        return \React\Promise\Stream\unwrapReadable(
+        $error = null;
+
+        $stream = \React\Promise\Stream\unwrapReadable(
             $this->getIdleConnection()->then(function (ConnectionInterface $connection) use ($sql, $params) {
                 $stream = $connection->queryStream($sql, $params);
                 $stream->on('end', function () use ($connection) {
@@ -86,11 +88,21 @@ class Pool
                     });
                 });
                 return $stream;
-            }, function (\Exception $e) {
+            }, function (\Exception $e) use (&$error) {
                 // todo over max_wait_queue and wait timed out after
+                $error = $e;
                 throw $e;
             })
         );
+
+        if ($error) {
+            \React\EventLoop\Loop::addTimer(0.0001, function() use ($stream, $error) {
+               $stream->emit('error', [$error]);
+            });
+        }
+
+        return $stream;
+
     }
 
     public function getIdleConnection()
