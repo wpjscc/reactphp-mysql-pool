@@ -14,48 +14,25 @@ require_once './vendor/autoload.php';
 
 use Wpjscc\MySQL\Pool;
 use React\MySQL\QueryResult;
-use React\MySQL\ConnectionInterface;
+use React\EventLoop\Loop;
 
 $pool = new Pool('username:password@host/databasename?timeout=5', [
-    'max_connections' => 10, // 10 connection --default 10
-    'max_wait_queue' => 50, // how many sql in queue --default 50
-    'wait_timeout' => 5,// wait time include response time --default 0
+    'max_connections' => 10, // 10 connection
+    'max_wait_queue' => 110, // how many sql in queue
+    'wait_timeout' => 5,// wait time include response time
 ]);
 
+qeury($pool);
+queryStream($pool);
 
-for ($i=0; $i < 10; $i++) { 
-    // auto releaseConnection
-    $pool->query('select * from blog')->then(function (QueryResult $command) use ($i) {
-        echo "query:$i\n";
-        if (isset($command->resultRows)) {
-            // this is a response to a SELECT etc. with some rows (0+)
-            print_r($command->resultFields);
-            print_r($command->resultRows);
-            echo count($command->resultRows) . ' row(s) in set' . PHP_EOL;
-        } else {
-            // this is an OK message in response to an UPDATE etc.
-            if ($command->insertId !== 0) {
-                var_dump('last insert ID', $command->insertId);
-            }
-            echo 'Query OK, ' . $command->affectedRows . ' row(s) affected' . PHP_EOL;
-        }
-    }, function (Exception $error) {
-        // the query was not executed successfully
-        echo 'Error: ' . $error->getMessage() . PHP_EOL;
-    });
-    
-}
-
-# or 
-for ($i=0; $i < 10; $i++) { 
-    $pool->getIdleConnection()->then(function(ConnectionInterface $connection) use ($pool, $i) {
-        $connection->query('select * from blog')->then(function (QueryResult $command) use ($i) {
-            echo "getIdleConnection:$i\n";
-
+function qeury($pool) {
+    for ($i=0; $i < 90; $i++) { 
+        $pool->query('select * from blog')->then(function (QueryResult $command) use ($i) {
+            echo "query:$i\n";
             if (isset($command->resultRows)) {
                 // this is a response to a SELECT etc. with some rows (0+)
-                print_r($command->resultFields);
-                print_r($command->resultRows);
+                // print_r($command->resultFields);
+                // print_r($command->resultRows);
                 echo count($command->resultRows) . ' row(s) in set' . PHP_EOL;
             } else {
                 // this is an OK message in response to an UPDATE etc.
@@ -64,16 +41,43 @@ for ($i=0; $i < 10; $i++) {
                 }
                 echo 'Query OK, ' . $command->affectedRows . ' row(s) affected' . PHP_EOL;
             }
-        }, function (Exception $error) {
+        }, function (\Exception $error) {
             // the query was not executed successfully
             echo 'Error: ' . $error->getMessage() . PHP_EOL;
-        })->always(function() use ($pool, $connection) {
-            $pool->releaseConnection($connection);
         });
-    }, function (Exception $error) {
-        // the query was not executed successfully
-        echo 'Error: ' . $error->getMessage() . PHP_EOL;
-    });
+        
+    }
 }
+
+function queryStream($pool){
+    for ($i=0; $i < 90; $i++) { 
+        (function($pool,$i){
+            $stream = $pool->queryStream('select * from blog');
+            if (!$stream->isReadable()) {
+                echo "queryStream:closed\n";
+            } else {
+                $stream->on('data', function ($data) use ($i) {
+                    // echo "queryStream:$i\n";
+                    // print_r($data);
+                });
+                $stream->on('error', function ($err) {
+                    echo 'Error: ' . $err->getMessage() . PHP_EOL;
+                });
+                $stream->on('end', function () use ($i) {
+                    echo 'Completed.'.$i . PHP_EOL;
+                });
+            }
+           
+        })($pool, $i);
+        
+    }
+}
+
+
+Loop::addPeriodicTimer(5, function() use ($pool) {
+    // qeury($pool);
+    // queryStream($pool);
+});
+
 
 ```

@@ -70,6 +70,28 @@ class Pool
         return $deferred->promise();
 
     }
+    public function queryStream($sql, array $params = [])
+    {   
+        return \React\Promise\Stream\unwrapReadable(
+            $this->getIdleConnection()->then(function (ConnectionInterface $connection) use ($sql, $params) {
+                $stream = $connection->queryStream($sql, $params);
+                $stream->on('end', function () use ($connection) {
+                    $this->releaseConnection($connection);
+                });
+                $stream->on('error', function ($err) use ($connection) {
+                    $connection->ping()->then(function () use ($connection) {
+                        $this->releaseConnection($connection);
+                    }, function (\Exception $e) {
+                        $this->current_connections--;
+                    });
+                });
+                return $stream;
+            }, function (\Exception $e) {
+                // todo over max_wait_queue and wait timed out after
+                throw $e;
+            })
+        );
+    }
 
     public function getIdleConnection()
     {
