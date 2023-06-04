@@ -54,7 +54,14 @@ class Pool
                 $this->releaseConnection($connection);
             }, function (\Exception $e) use ($deferred, $connection) {
                 $deferred->reject($e);
-                $this->releaseConnection($connection);
+                
+                $connection->ping()->then(function () use ($connection) {
+                    $this->releaseConnection($connection);
+                    echo 'OK' . PHP_EOL;
+                }, function (\Exception $e) {
+                    $this->current_connections--;
+                    echo 'Error: ' . $e->getMessage() . PHP_EOL;
+                });
             });
         }, function (\Exception $e) use ($deferred) {
             $deferred->reject($e);
