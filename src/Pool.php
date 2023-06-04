@@ -89,7 +89,6 @@ class Pool
                 });
                 return $stream;
             }, function (\Exception $e) use (&$error) {
-                // todo over max_wait_queue and wait timed out after
                 $error = $e;
                 throw $e;
             })
