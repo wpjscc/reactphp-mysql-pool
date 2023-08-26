@@ -1,0 +1,12 @@
+{
+    "name":"wpjscc/reactphp-mysql-pool",
+    "require": {
+        "react/mysql": "^0.6@dev",
+        "react/async": "^4.1"
+    },
+    "autoload": {
+        "psr-4": {
+            "Wpjscc\\MySQL\\": "src"
+        }
+    }
+}
