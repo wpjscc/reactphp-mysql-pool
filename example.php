@@ -6,13 +6,15 @@ use Wpjscc\MySQL\Pool;
 use React\MySQL\QueryResult;
 use React\EventLoop\Loop;
 
-$pool = new Pool('username:password@host/databasename?timeout=5', [
+$pool = new Pool(getenv('MYSQL_URI') ?: 'username:password@host/databasename?timeout=5', [
+    'min_connections' => 2, // 10 connection
     'max_connections' => 10, // 10 connection
-    'max_wait_queue' => 110, // how many sql in queue
+    'max_wait_queue' => 70, // how many sql in queue
     'wait_timeout' => 5,// wait time include response time
+    'keep_alive' => 60
 ]);
 
-// query($pool);
+query($pool);
 // queryStream($pool);
 
 function query($pool) {
@@ -61,15 +63,22 @@ function queryStream($pool){
     }
 }
 
-
-Loop::addPeriodicTimer(5, function() use ($pool) {
-    // query($pool);
-    // queryStream($pool);
+\React\EventLoop\Loop::addTimer(10, function () use ($pool) {
+    queryStream($pool);
 });
 
-$pool->translation(function($connection){
-    $connection->query("INSERT INTO blog_test (content) VALUES ('hello world success')");
+
+Loop::addPeriodicTimer(2, function () use ($pool) {
+    // query($pool);
+    // queryStream($pool);
+    echo 'pool_count:'. $pool->getPoolCount() . PHP_EOL;
+    echo 'idleConnectionCount:'. $pool->idleConnectionCount() . PHP_EOL;
+});
+
+$pool->translation(function ($connection) {
     // throw new Exception("Error Processing Request", 1);
+
+    return \React\Async\await($connection->query("INSERT INTO blog_test (content) VALUES ('hello world success')"));
 })->then(function($result){
     var_dump($result);
 }, function($error){

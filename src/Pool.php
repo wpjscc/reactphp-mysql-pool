@@ -1,4 +1,4 @@
-<?php 
+<?php
 
 namespace Wpjscc\MySQL;
 
@@ -13,7 +13,11 @@ use React\Promise\Timer\TimeoutException;
 
 class Pool
 {
+    private $min_connections;
     private $max_connections;
+
+    private $keep_alive;
+
     private $max_wait_queue;
     private $current_connections = 0;
     private $wait_timeout = 0;
@@ -29,13 +33,15 @@ class Pool
         $config = [],
         LoopInterface $loop = null,
         ConnectorInterface $connector = null
-    )
-    {
+    ) {
         $this->uri = $uri;
+        $this->min_connections = $config['min_connections'] ?? 2;
         $this->max_connections = $config['max_connections'] ?? 10;
+        $this->keep_alive = $config['keep_alive'] ?? 60;
         $this->max_wait_queue = $config['max_wait_queue'] ?? 50;
         $this->wait_timeout = $config['wait_timeout'] ?? 0;
         $this->wait_queue = new \SplObjectStorage;
+        $this->idle_connections = new \SplObjectStorage;
         $this->loop = $loop ?: Loop::get();
         $this->factory = new Factory($loop, $connector);;
     }
@@ -45,7 +51,7 @@ class Pool
         $deferred = new Deferred();
 
         $this->getIdleConnection()->then(function (ConnectionInterface $connection) use ($sql, $params, $deferred) {
-            $connection->query($sql, $params)->then(function(QueryResult $command) use ($deferred, $connection) {
+            $connection->query($sql, $params)->then(function (QueryResult $command) use ($deferred, $connection) {
                 try {
                     $deferred->resolve($command);
                 } catch (\Throwable $th) {
@@ -54,7 +60,7 @@ class Pool
                 $this->releaseConnection($connection);
             }, function (\Exception $e) use ($deferred, $connection) {
                 $deferred->reject($e);
-                
+
                 $connection->ping()->then(function () use ($connection) {
                     $this->releaseConnection($connection);
                     echo 'OK' . PHP_EOL;
@@ -68,10 +74,9 @@ class Pool
         });
 
         return $deferred->promise();
-
     }
     public function queryStream($sql, array $params = [])
-    {   
+    {
         $error = null;
 
         $stream = \React\Promise\Stream\unwrapReadable(
@@ -95,19 +100,22 @@ class Pool
         );
 
         if ($error) {
-            \React\EventLoop\Loop::addTimer(0.0001, function() use ($stream, $error) {
-               $stream->emit('error', [$error]);
+            \React\EventLoop\Loop::addTimer(0.0001, function () use ($stream, $error) {
+                $stream->emit('error', [$error]);
             });
         }
 
         return $stream;
-
     }
 
     public function getIdleConnection()
     {
-        if ($this->idle_connections) {
-            $connection = array_shift($this->idle_connections);
+        if ($this->idle_connections->count() > 0) {
+            $connection = $this->idle_connections->current();
+            if ($timer = $this->idle_connections[$connection]['timer']) {
+                \React\EventLoop\Loop::cancelTimer($timer);
+            }
+            $this->idle_connections->detach($connection);
             return \React\Promise\resolve($connection);
         }
 
@@ -117,7 +125,7 @@ class Pool
         }
 
         if ($this->max_wait_queue && $this->wait_queue->count() >= $this->max_wait_queue) {
-            return \React\Promise\reject(new \Exception("over max_wait_queue: ". $this->max_wait_queue.'-current quueue:'.$this->wait_queue->count()));
+            return \React\Promise\reject(new \Exception("over max_wait_queue: " . $this->max_wait_queue . '-current quueue:' . $this->wait_queue->count()));
         }
 
         $deferred = new Deferred();
@@ -126,16 +134,16 @@ class Pool
         if (!$this->wait_timeout) {
             return $deferred->promise();
         }
-        
+
         $that = $this;
 
         return \React\Promise\Timer\timeout($deferred->promise(), $this->wait_timeout, $this->loop)->then(null, function ($e) use ($that, $deferred) {
-            
+
             $that->wait_queue->detach($deferred);
 
             if ($e instanceof TimeoutException) {
                 throw new \RuntimeException(
-                    'wait timed out after ' . $e->getTimeout() . ' seconds (ETIMEDOUT)'. 'and wait queue '.$that->wait_queue->count().' count',
+                    'wait timed out after ' . $e->getTimeout() . ' seconds (ETIMEDOUT)' . 'and wait queue ' . $that->wait_queue->count() . ' count',
                     \defined('SOCKET_ETIMEDOUT') ? \SOCKET_ETIMEDOUT : 110
                 );
             }
@@ -145,14 +153,25 @@ class Pool
 
     public function releaseConnection(ConnectionInterface $connection)
     {
-        if ($this->wait_queue->count()>0) {
+        if ($this->wait_queue->count() > 0) {
             $deferred = $this->wait_queue->current();
             $deferred->resolve($connection);
             $this->wait_queue->detach($deferred);
             return;
         }
 
-        $this->idle_connections[] = $connection;
+
+        $timer = \React\EventLoop\Loop::addTimer($this->keep_alive, function () use ($connection) {
+            if ($this->idle_connections->count() > $this->min_connections) {
+                $connection->quit();
+                $this->idle_connections->detach($connection);
+                $this->current_connections--;
+            }
+        });
+
+        $this->idle_connections->attach($connection, [
+            'timer' => $timer
+        ]);
     }
 
 
@@ -165,7 +184,9 @@ class Pool
             $connection->query('BEGIN')
                 ->then(function () use ($callable, $connection) {
                     try {
-                        return \React\Async\async($callable($connection))();
+                        return \React\Async\async(function () use ($callable, $connection) {
+                            return $callable($connection);
+                        })();
                     } catch (\Throwable $th) {
                         throw $th;
                     }
@@ -178,7 +199,7 @@ class Pool
                         $that->ping($connection);
                         $deferred->reject($error);
                     });
-                }, function($error) use ($connection, $deferred, $that) {
+                }, function ($error) use ($connection, $deferred, $that) {
                     $connection->query('ROLLBACK')->then(function () use ($error, $deferred, $connection, $that) {
                         $that->releaseConnection($connection);
                         $deferred->reject($error);
@@ -187,7 +208,6 @@ class Pool
                         $deferred->reject($error);
                     });
                 });
-                
         }, function ($error) use ($deferred) {
             $deferred->reject($error);
         });
@@ -203,5 +223,15 @@ class Pool
         }, function (\Exception $e) use ($that) {
             $that->current_connections--;
         });
+    }
+
+    public function getPoolCount()
+    {
+        return $this->current_connections;
+    }
+    
+    public function idleConnectionCount()
+    {
+        return $this->idle_connections->count();
     }
 }
