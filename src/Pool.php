@@ -35,11 +35,11 @@ class Pool
         ConnectorInterface $connector = null
     ) {
         $this->uri = $uri;
-        $this->min_connections = $config['min_connections'] ?? 2;
+        $this->min_connections = $config['min_connections'] ?? 1;
         $this->max_connections = $config['max_connections'] ?? 10;
         $this->keep_alive = $config['keep_alive'] ?? 60;
-        $this->max_wait_queue = $config['max_wait_queue'] ?? 50;
-        $this->wait_timeout = $config['wait_timeout'] ?? 0;
+        $this->max_wait_queue = $config['max_wait_queue'] ?? 100;
+        $this->wait_timeout = $config['wait_timeout'] ?? 1;
         $this->wait_queue = new \SplObjectStorage;
         $this->idle_connections = new \SplObjectStorage;
         $this->loop = $loop ?: Loop::get();
@@ -111,6 +111,7 @@ class Pool
     public function getIdleConnection()
     {
         if ($this->idle_connections->count() > 0) {
+            $this->idle_connections->rewind();
             $connection = $this->idle_connections->current();
             if ($timer = $this->idle_connections[$connection]['timer']) {
                 \React\EventLoop\Loop::cancelTimer($timer);
@@ -154,6 +155,7 @@ class Pool
     public function releaseConnection(ConnectionInterface $connection)
     {
         if ($this->wait_queue->count() > 0) {
+            $this->wait_queue->rewind();
             $deferred = $this->wait_queue->current();
             $deferred->resolve($connection);
             $this->wait_queue->detach($deferred);
@@ -228,6 +230,11 @@ class Pool
     public function getPoolCount()
     {
         return $this->current_connections;
+    }
+    
+    public function getWaitCount()
+    {
+        return $this->wait_queue->count();
     }
     
     public function idleConnectionCount()
