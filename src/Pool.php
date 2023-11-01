@@ -52,12 +52,12 @@ class Pool
 
         $this->getIdleConnection()->then(function (ConnectionInterface $connection) use ($sql, $params, $deferred) {
             $connection->query($sql, $params)->then(function (QueryResult $command) use ($deferred, $connection) {
+                $this->releaseConnection($connection);
                 try {
                     $deferred->resolve($command);
                 } catch (\Throwable $th) {
                     //todo handle $th
                 }
-                $this->releaseConnection($connection);
             }, function (\Exception $e) use ($deferred, $connection) {
                 $deferred->reject($e);
 
