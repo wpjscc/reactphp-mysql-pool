@@ -115,6 +115,10 @@ class Pool
             if ($timer = $this->idle_connections[$connection]['timer']) {
                 \React\EventLoop\Loop::cancelTimer($timer);
             }
+            if ($ping = $this->idle_connections[$connection]['ping']) {
+                \React\EventLoop\Loop::cancelTimer($ping);
+                $ping = null;
+            }
             $this->idle_connections->detach($connection);
             return \React\Promise\resolve($connection);
         }
@@ -162,16 +166,26 @@ class Pool
         }
 
 
-        $timer = \React\EventLoop\Loop::addTimer($this->keep_alive, function () use ($connection) {
+        $ping = null;
+        $timer = \React\EventLoop\Loop::addTimer($this->keep_alive, function () use ($connection, &$ping) {
             if ($this->idle_connections->count() > $this->min_connections) {
                 $connection->quit();
                 $this->idle_connections->detach($connection);
                 $this->current_connections--;
+            } else {
+                $ping = \React\EventLoop\Loop::addPeriodicTimer($this->keep_alive, function () use ($connection) {
+                    $connection->ping()->then(function () use ($connection) {
+                    }, function ($e)  use ($connection) {
+                        $this->idle_connections->detach($connection);
+                        $this->current_connections--;
+                    });
+                });
             }
         });
 
         $this->idle_connections->attach($connection, [
-            'timer' => $timer
+            'timer' => $timer,
+            'ping' => &$ping
         ]);
     }
 
