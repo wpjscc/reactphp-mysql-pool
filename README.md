@@ -28,9 +28,11 @@ use React\MySQL\QueryResult;
 use React\EventLoop\Loop;
 
 $pool = new Pool('username:password@host/databasename?timeout=5', [
-    'max_connections' => 10, // 10 connection
+    'min_connections' => 2, // min 2 connection
+    'max_connections' => 10, // max 10 connection
     'max_wait_queue' => 110, // how many sql in queue
     'wait_timeout' => 5,// wait time include response time
+    'keep_alive' => 60, // 
 ]);
 
 qeury($pool);
