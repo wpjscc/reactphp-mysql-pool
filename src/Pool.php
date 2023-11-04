@@ -62,11 +62,7 @@ class Pool
             }, function ($e) use ($deferred, $connection) {
                 $deferred->reject($e);
 
-                $connection->ping()->then(function () use ($connection) {
-                    $this->releaseConnection($connection);
-                }, function ($e) {
-                    $this->current_connections--;
-                });
+                $this->ping($connection);
             });
         }, function ($e) use ($deferred) {
             $deferred->reject($e);
@@ -85,11 +81,7 @@ class Pool
                     $this->releaseConnection($connection);
                 });
                 $stream->on('error', function ($err) use ($connection) {
-                    $connection->ping()->then(function () use ($connection) {
-                        $this->releaseConnection($connection);
-                    }, function ($e) {
-                        $this->current_connections--;
-                    });
+                    $this->ping($connection);
                 });
                 return $stream;
             }, function ($e) use (&$error) {
@@ -173,13 +165,22 @@ class Pool
                 $this->idle_connections->detach($connection);
                 $this->current_connections--;
             } else {
-                $ping = \React\EventLoop\Loop::addPeriodicTimer($this->keep_alive, function () use ($connection) {
-                    $connection->ping()->then(function () use ($connection) {
-                    }, function ($e)  use ($connection) {
-                        $this->idle_connections->detach($connection);
-                        $this->current_connections--;
-                    });
+              
+                $ping = \React\EventLoop\Loop::addPeriodicTimer($this->keep_alive, function () use ($connection, &$ping) {
+                   $this->ping($connection)->then(null, function($e) use ($ping){
+                       if ($ping) {
+                           \React\EventLoop\Loop::cancelTimer($ping);
+                       }
+                       $ping = null;
+                   });
                 });
+                $this->ping($connection)->then(null, function($e) use ($ping){
+                    if ($ping) {
+                        \React\EventLoop\Loop::cancelTimer($ping);
+                    }
+                    $ping = null;
+                });
+
             }
         });
 
@@ -233,10 +234,16 @@ class Pool
     public function ping($connection)
     {
         $that = $this;
-        $connection->ping()->then(function () use ($connection, $that) {
-            $that->releaseConnection($connection);
-        }, function ($e) use ($that) {
+        return $connection->ping()->then(function () use ($connection, $that) {
+            if (!$that->idle_connections->contains($connection)) {
+                $that->releaseConnection($connection);
+            }
+        }, function ($e) use ($connection, $that) {
+            if ($that->idle_connections->contains($connection)) {
+                $that->idle_connections->detach($connection);
+            }
             $that->current_connections--;
+            throw $e;
         });
     }
 
