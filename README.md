@@ -1,5 +1,16 @@
 # reactphp-mysql-pool
 
+```
+    +----------------+
+    |   connect pool --------------------------> mysql server
+    |       |        |
+    |       |        |
+    |       |        |
+    |       app      |
+    +----------------+
+
+```
+
 
 ## install
 
