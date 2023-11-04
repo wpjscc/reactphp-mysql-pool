@@ -31,6 +31,7 @@ class Pool
     public function __construct(
         $uri,
         $config = [],
+        Factory $factory = null,
         LoopInterface $loop = null,
         ConnectorInterface $connector = null
     ) {
@@ -43,7 +44,7 @@ class Pool
         $this->wait_queue = new \SplObjectStorage;
         $this->idle_connections = new \SplObjectStorage;
         $this->loop = $loop ?: Loop::get();
-        $this->factory = new Factory($loop, $connector);;
+        $this->factory = $factory ?: new Factory($loop, $connector);;
     }
 
     public function query($sql, array $params = [])
@@ -58,18 +59,16 @@ class Pool
                 } catch (\Throwable $th) {
                     //todo handle $th
                 }
-            }, function (\Exception $e) use ($deferred, $connection) {
+            }, function ($e) use ($deferred, $connection) {
                 $deferred->reject($e);
 
                 $connection->ping()->then(function () use ($connection) {
                     $this->releaseConnection($connection);
-                    echo 'OK' . PHP_EOL;
-                }, function (\Exception $e) {
+                }, function ($e) {
                     $this->current_connections--;
-                    echo 'Error: ' . $e->getMessage() . PHP_EOL;
                 });
             });
-        }, function (\Exception $e) use ($deferred) {
+        }, function ($e) use ($deferred) {
             $deferred->reject($e);
         });
 
@@ -88,12 +87,12 @@ class Pool
                 $stream->on('error', function ($err) use ($connection) {
                     $connection->ping()->then(function () use ($connection) {
                         $this->releaseConnection($connection);
-                    }, function (\Exception $e) {
+                    }, function ($e) {
                         $this->current_connections--;
                     });
                 });
                 return $stream;
-            }, function (\Exception $e) use (&$error) {
+            }, function ($e) use (&$error) {
                 $error = $e;
                 throw $e;
             })
@@ -222,7 +221,7 @@ class Pool
         $that = $this;
         $connection->ping()->then(function () use ($connection, $that) {
             $that->releaseConnection($connection);
-        }, function (\Exception $e) use ($that) {
+        }, function ($e) use ($that) {
             $that->current_connections--;
         });
     }
@@ -231,12 +230,12 @@ class Pool
     {
         return $this->current_connections;
     }
-    
+
     public function getWaitCount()
     {
         return $this->wait_queue->count();
     }
-    
+
     public function idleConnectionCount()
     {
         return $this->idle_connections->count();
