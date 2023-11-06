@@ -75,7 +75,7 @@ Loop::addPeriodicTimer(2, function () use ($pool) {
     echo 'idleConnectionCount:'. $pool->idleConnectionCount() . PHP_EOL;
 });
 
-$pool->translation(function ($connection) {
+$pool->transaction(function ($connection) {
     // throw new Exception("Error Processing Request", 1);
 
     return \React\Async\await($connection->query("INSERT INTO blog_test (content) VALUES ('hello world success')"));
