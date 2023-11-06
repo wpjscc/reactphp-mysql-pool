@@ -8,11 +8,14 @@ use React\Socket\ConnectorInterface;
 use React\Promise\Deferred;
 use React\MySQL\ConnectionInterface;
 use React\MySQL\QueryResult;
+use React\MySQL\Exception;
 use React\EventLoop\Loop;
 use React\Promise\Timer\TimeoutException;
 
-class Pool
+class Pool implements ConnectionInterface
 {
+    use \Evenement\EventEmitterTrait;
+
     private $min_connections;
     private $max_connections;
 
@@ -26,6 +29,8 @@ class Pool
     private $loop;
     private $factory;
     private $uri;
+
+    protected $closed;
 
 
     public function __construct(
@@ -62,7 +67,7 @@ class Pool
             }, function ($e) use ($deferred, $connection) {
                 $deferred->reject($e);
 
-                $this->ping($connection);
+                $this->_ping($connection);
             });
         }, function ($e) use ($deferred) {
             $deferred->reject($e);
@@ -70,7 +75,8 @@ class Pool
 
         return $deferred->promise();
     }
-    public function queryStream($sql, array $params = [])
+    
+    public function queryStream($sql, $params = [])
     {
         $error = null;
 
@@ -81,7 +87,7 @@ class Pool
                     $this->releaseConnection($connection);
                 });
                 $stream->on('error', function ($err) use ($connection) {
-                    $this->ping($connection);
+                    $this->_ping($connection);
                 });
                 return $stream;
             }, function ($e) use (&$error) {
@@ -99,8 +105,49 @@ class Pool
         return $stream;
     }
 
+    public function quit()
+    {
+        if ($this->closed) {
+            return \React\Promise\reject(new Exception('pool is closed'));
+        }
+
+        $this->close();
+    }
+
+    public function close()
+    {
+        if ($this->closed) {
+            return;
+        }
+
+        $this->closed = true;
+
+        $this->emit('close');
+
+        while ($this->idle_connections->count() > 0) {
+            $this->idle_connections->rewind();
+            $connection = $this->idle_connections->current();
+            if ($timer = $this->idle_connections[$connection]['timer']) {
+                \React\EventLoop\Loop::cancelTimer($timer);
+            }
+            if ($ping = $this->idle_connections[$connection]['ping']) {
+                \React\EventLoop\Loop::cancelTimer($ping);
+                $ping = null;
+            }
+            $this->idle_connections->detach($connection);
+            $connection->close();
+            $this->current_connections--;
+        }
+
+        
+    }
+
     public function getIdleConnection()
     {
+        if ($this->closed) {
+            return \React\Promise\reject(new Exception('pool is closed'));
+        }
+
         if ($this->idle_connections->count() > 0) {
             $this->idle_connections->rewind();
             $connection = $this->idle_connections->current();
@@ -121,7 +168,7 @@ class Pool
         }
 
         if ($this->max_wait_queue && $this->wait_queue->count() >= $this->max_wait_queue) {
-            return \React\Promise\reject(new \Exception("over max_wait_queue: " . $this->max_wait_queue . '-current quueue:' . $this->wait_queue->count()));
+            return \React\Promise\reject(new Exception("over max_wait_queue: " . $this->max_wait_queue . '-current quueue:' . $this->wait_queue->count()));
         }
 
         $deferred = new Deferred();
@@ -149,6 +196,13 @@ class Pool
 
     public function releaseConnection(ConnectionInterface $connection)
     {
+
+        if ($this->closed) {
+            $connection->close();
+            $this->current_connections--;
+            return;
+        }
+
         if ($this->wait_queue->count() > 0) {
             $this->wait_queue->rewind();
             $deferred = $this->wait_queue->current();
@@ -165,16 +219,15 @@ class Pool
                 $this->idle_connections->detach($connection);
                 $this->current_connections--;
             } else {
-              
                 $ping = \React\EventLoop\Loop::addPeriodicTimer($this->keep_alive, function () use ($connection, &$ping) {
-                   $this->ping($connection)->then(null, function($e) use ($ping){
+                   $this->_ping($connection)->then(null, function($e) use ($ping){
                        if ($ping) {
                            \React\EventLoop\Loop::cancelTimer($ping);
                        }
                        $ping = null;
                    });
                 });
-                $this->ping($connection)->then(null, function($e) use ($ping){
+                $this->_ping($connection)->then(null, function($e) use ($ping){
                     if ($ping) {
                         \React\EventLoop\Loop::cancelTimer($ping);
                     }
@@ -191,7 +244,7 @@ class Pool
     }
 
 
-    public function translation(callable $callable)
+    public function transaction(callable $callable)
     {
         $that = $this;
         $deferred = new Deferred();
@@ -212,7 +265,7 @@ class Pool
                         $that->releaseConnection($connection);
                         $deferred->resolve($result);
                     }, function ($error) use ($deferred, $connection, $that) {
-                        $that->ping($connection);
+                        $that->_ping($connection);
                         $deferred->reject($error);
                     });
                 }, function ($error) use ($connection, $deferred, $that) {
@@ -220,7 +273,7 @@ class Pool
                         $that->releaseConnection($connection);
                         $deferred->reject($error);
                     }, function () use ($deferred, $connection, $that, $error) {
-                        $that->ping($connection);
+                        $that->_ping($connection);
                         $deferred->reject($error);
                     });
                 });
@@ -231,10 +284,15 @@ class Pool
         return $deferred->promise();
     }
 
-    public function ping($connection)
+    public function ping()
+    {
+        throw new Exception('ping is not supported');
+    }
+
+    protected function _ping($connection)
     {
         $that = $this;
-        return $connection->ping()->then(function () use ($connection, $that) {
+        return $connection->_ping()->then(function () use ($connection, $that) {
             if (!$that->idle_connections->contains($connection)) {
                 $that->releaseConnection($connection);
             }
