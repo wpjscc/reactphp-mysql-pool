@@ -292,7 +292,7 @@ class Pool implements ConnectionInterface
     protected function _ping($connection)
     {
         $that = $this;
-        return $connection->_ping()->then(function () use ($connection, $that) {
+        return $connection->ping()->then(function () use ($connection, $that) {
             if (!$that->idle_connections->contains($connection)) {
                 $that->releaseConnection($connection);
             }
